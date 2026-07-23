@@ -1,19 +1,16 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "index.html",
-      "use": "@vercel/static"
-    },
-    {
-      "src": "api/download.py",
-      "use": "@vercel/python"
+  "functions": {
+    "api/download.py": {
+      "runtime": "vercel-python@4.x",
+      "maxDuration": 30
     }
-  ],
+  },
   "routes": [
     {
       "src": "/api/download",
-      "dest": "/api/download.py"
+      "dest": "/api/download.py",
+      "methods": ["POST", "OPTIONS"]
     },
     {
       "src": "/(.*)",
