@@ -3,7 +3,8 @@ from http.server import BaseHTTPRequestHandler
 import urllib.request
 import urllib.error
 
-COBALT_API = "https://cobalt.tools/api/json"
+# Cobalt API v1 - الـ endpoint الصحيح والفعّال
+COBALT_API = "https://api.cobalt.tools/"
 
 class handler(BaseHTTPRequestHandler):
 
@@ -25,9 +26,9 @@ class handler(BaseHTTPRequestHandler):
         try:
             payload = json.dumps({
                 "url": video_url,
-                "vQuality": "max",
-                "filenamePattern": "classic",
-                "isAudioOnly": False,
+                "videoQuality": "max",
+                "filenameStyle": "classic",
+                "downloadMode": "auto",
                 "disableMetadata": True
             }).encode('utf-8')
 
@@ -37,12 +38,12 @@ class handler(BaseHTTPRequestHandler):
                 headers={
                     "Content-Type": "application/json",
                     "Accept": "application/json",
-                    "User-Agent": "Mozilla/5.0"
+                    "User-Agent": "Mozilla/5.0 (compatible; VideoDownloader/2.0)"
                 },
                 method="POST"
             )
 
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=20) as resp:
                 result = json.loads(resp.read().decode('utf-8'))
 
             status = result.get("status", "")
@@ -57,19 +58,20 @@ class handler(BaseHTTPRequestHandler):
                 if picker:
                     self._respond(200, {
                         "download_url": picker[0].get("url"),
-                        "filename": "video.mp4"
+                        "filename": picker[0].get("filename", "video.mp4")
                     })
                 else:
                     self._respond(500, {"error": "لم يتم العثور على رابط للتحميل"})
             elif status == "error":
-                err_text = result.get("text", "خطأ من الخادم")
-                self._respond(500, {"error": f"فشل: {err_text}"})
+                err = result.get("error", {})
+                err_text = err.get("code", "خطأ من الخادم") if isinstance(err, dict) else str(err)
+                self._respond(500, {"error": f"فشل التحميل: {err_text}"})
             else:
                 self._respond(500, {"error": f"استجابة غير متوقعة: {status}"})
 
         except urllib.error.HTTPError as e:
-            body_err = e.read().decode('utf-8', errors='ignore')[:300]
-            self._respond(502, {"error": f"HTTP {e.code}: {body_err}"})
+            body_err = e.read().decode('utf-8', errors='ignore')[:400]
+            self._respond(502, {"error": f"خطأ من خادم التحميل ({e.code}): {body_err}"})
         except urllib.error.URLError as e:
             self._respond(503, {"error": f"تعذّر الوصول إلى خادم التحميل: {str(e.reason)}"})
         except Exception as e:
@@ -92,4 +94,4 @@ class handler(BaseHTTPRequestHandler):
     def _cors_headers(self):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Accept')
