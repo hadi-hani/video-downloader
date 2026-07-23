@@ -2,15 +2,30 @@ from http.server import BaseHTTPRequestHandler
 import json
 import urllib.request
 import urllib.error
+import ssl
 
-# cobalt instances — server-side, no CORS, no JWT issues
+# Public cobalt instances — tested July 2026, no JWT required
 INSTANCES = [
-    'https://cobalt.api.timelessnesses.me',
-    'https://cobalt.lem.sh',
+    'https://cobalt.api.hussien.dev',
+    'https://cobalt.catvibers.me',
+    'https://cbl.risewill.org',
+    'https://cobalt.foss.wtf',
+    'https://cobalt.privacyredirect.com',
+    'https://cobalt.perish.co',
     'https://api.cobalt.tools',
+    'https://cobalt.lem.sh',
+    'https://cobalt.api.timelessnesses.me',
 ]
 
+SSL_CTX = ssl.create_default_context()
+SSL_CTX.check_hostname = False
+SSL_CTX.verify_mode = ssl.CERT_NONE
+
+
 class handler(BaseHTTPRequestHandler):
+
+    def log_message(self, format, *args):
+        pass  # silence default stderr logs
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -37,10 +52,12 @@ class handler(BaseHTTPRequestHandler):
             'videoQuality': '1080',
             'filenameStyle': 'classic',
             'downloadMode': 'auto',
-            'disableMetadata': True
+            'disableMetadata': True,
         }).encode('utf-8')
 
         last_error = None
+        skip_codes = {'error.api.auth.jwt.missing', 'error.api.auth.jwt.invalid',
+                      'error.api.auth.key.missing', 'error.api.auth.key.invalid'}
 
         for instance in INSTANCES:
             try:
@@ -50,40 +67,49 @@ class handler(BaseHTTPRequestHandler):
                     headers={
                         'Content-Type': 'application/json',
                         'Accept': 'application/json',
-                        'User-Agent': 'Mozilla/5.0'
+                        'User-Agent': 'Mozilla/5.0 (compatible; cobalt-client/1.0)',
                     },
                     method='POST'
                 )
-                with urllib.request.urlopen(req, timeout=15) as resp:
+                with urllib.request.urlopen(req, timeout=12, context=SSL_CTX) as resp:
                     data = json.loads(resp.read().decode('utf-8'))
 
-                # skip this instance if it needs auth
                 if data.get('status') == 'error':
-                    code = ''
                     err = data.get('error', {})
-                    if isinstance(err, dict):
-                        code = err.get('code', '')
-                    elif isinstance(err, str):
-                        code = err
-                    if 'auth' in code or 'jwt' in code:
+                    code = err.get('code', '') if isinstance(err, dict) else str(err)
+                    if code in skip_codes:
                         last_error = data
-                        continue
+                        continue  # try next instance
 
                 self._json(200, data)
                 return
 
             except urllib.error.HTTPError as e:
+                body_bytes = b''
                 try:
-                    last_error = json.loads(e.read().decode('utf-8'))
+                    body_bytes = e.read()
+                    err_data = json.loads(body_bytes.decode('utf-8'))
+                    code = ''
+                    err = err_data.get('error', {})
+                    if isinstance(err, dict):
+                        code = err.get('code', '')
+                    elif isinstance(err, str):
+                        code = err
+                    last_error = err_data
+                    if e.code == 401 or code in skip_codes:
+                        continue
                 except Exception:
                     last_error = {'status': 'error', 'error': {'code': 'error.api.fetch.fail'}}
-                # if auth error, try next
-                continue
-            except Exception as e:
-                last_error = {'status': 'error', 'error': {'code': 'error.api.fetch.fail', 'message': str(e)}}
                 continue
 
-        # all instances failed
+            except Exception as exc:
+                last_error = {
+                    'status': 'error',
+                    'error': {'code': 'error.api.fetch.fail', 'message': str(exc)}
+                }
+                continue
+
+        # All instances failed or required auth
         self._json(502, last_error or {
             'status': 'error',
             'error': {'code': 'error.api.fetch.fail'}
