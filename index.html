@@ -53,7 +53,7 @@
     }
     input::placeholder { color: rgba(255,255,255,0.4); }
     input:focus { border-color: #7c6fcd; }
-    button {
+    button.main-btn {
       width: 100%;
       padding: 16px;
       background: linear-gradient(135deg, #7c6fcd, #5a4fcf);
@@ -65,8 +65,8 @@
       cursor: pointer;
       transition: all 0.3s;
     }
-    button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(124,111,205,0.5); }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    button.main-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(124,111,205,0.5); }
+    button.main-btn:disabled { opacity: 0.6; cursor: not-allowed; }
     .status {
       margin-top: 24px;
       padding: 16px 20px;
@@ -98,6 +98,21 @@
     .spinner { display: inline-block; width: 16px; height: 16px; border: 3px solid rgba(255,215,0,0.3); border-top-color: #ffd700; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-left: 6px; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .footer { margin-top: 32px; color: rgba(255,255,255,0.3); font-size: 12px; }
+    .picker-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+    .picker-item {
+      display: block;
+      padding: 12px 16px;
+      background: rgba(0,200,83,0.15);
+      border: 1px solid rgba(0,200,83,0.3);
+      border-radius: 12px;
+      color: #00ff82;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+      text-align: center;
+    }
+    .picker-item:hover { background: rgba(0,200,83,0.25); transform: translateY(-1px); }
   </style>
 </head>
 <body>
@@ -107,60 +122,102 @@
     <p class="subtitle">حمّل أي فيديو قصير بضغطة واحدة</p>
 
     <div class="platforms">
-      <span class="badge">▶ YouTube Shorts</span>
-      <span class="badge">📸 Instagram Reels</span>
-      <span class="badge">🎵 TikTok</span>
-      <span class="badge">🐦 Twitter/X</span>
+      <span class="badge">TikTok 🎵</span>
+      <span class="badge">Instagram Reels 📸</span>
+      <span class="badge">YouTube Shorts ▶</span>
     </div>
 
     <div class="input-group">
       <input type="url" id="videoUrl" placeholder="الصق رابط الفيديو هنا..." />
-      <button id="downloadBtn" onclick="startDownload()">⬇ تحميل الفيديو</button>
+      <button class="main-btn" id="downloadBtn" onclick="startDownload()">⬇ تحميل الفيديو</button>
     </div>
 
     <div class="status" id="status"></div>
-
-    <div class="download-section" id="downloadSection">
-      <a class="download-btn" id="dlLink" target="_blank" rel="noopener">💾 اضغط هنا لتنزيل الفيديو</a>
-    </div>
+    <div class="download-section" id="downloadSection"></div>
 
     <div class="footer">يدعم روابط YouTube · Instagram · TikTok · Twitter/X</div>
   </div>
 
   <script>
+    const COBALT = 'https://api.cobalt.tools';
+
+    const ERRORS = {
+      'error.api.auth.jwt.missing':       'خدمة التحميل تتطلب مصادقة حالياً',
+      'error.api.auth.key.missing':        'مطلوب مفتاح API',
+      'error.api.link.invalid':            'الرابط غير صالح أو غير مدعوم',
+      'error.api.fetch.fail':              'تعذّر جلب الفيديو – قد يكون خاصاً أو محذوفاً',
+      'error.api.youtube.login':           'هذا الفيديو يتطلب تسجيل الدخول على YouTube',
+      'error.api.content.too_long':        'الفيديو طويل جداً',
+      'error.api.content.video.unavailable': 'الفيديو غير متاح',
+    };
+
     async function startDownload() {
       const url = document.getElementById('videoUrl').value.trim();
       const btn = document.getElementById('downloadBtn');
       const dlSection = document.getElementById('downloadSection');
-      const dlLink = document.getElementById('dlLink');
 
       if (!url) { showStatus('error', '⚠️ من فضلك أدخل رابط الفيديو'); return; }
 
       btn.disabled = true;
       dlSection.style.display = 'none';
+      dlSection.innerHTML = '';
       showStatus('loading', '<span class="spinner"></span> جارٍ معالجة الفيديو...');
 
       try {
-        const res = await fetch('/api/download', {
+        const res = await fetch(COBALT, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url })
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({
+            url,
+            videoQuality: '1080',
+            filenameStyle: 'classic',
+            downloadMode: 'auto',
+            disableMetadata: true
+          })
         });
-        const data = await res.json();
 
-        if (data.download_url) {
-          showStatus('success', '✅ تم! اضغط الزر بالأسفل لتنزيل الفيديو');
-          dlLink.href = data.download_url;
-          dlLink.download = data.filename || 'video.mp4';
-          dlSection.style.display = 'block';
-        } else {
-          showStatus('error', '❌ ' + (data.error || 'حدث خطأ غير متوقع'));
-        }
+        const data = await res.json();
+        handleResult(data, dlSection);
+
       } catch (e) {
-        showStatus('error', '❌ فشل الاتصال بالخادم');
+        showStatus('error', '❌ فشل الاتصال – تحقق من الإنترنت');
       }
 
       btn.disabled = false;
+    }
+
+    function handleResult(data, dlSection) {
+      const status = data.status;
+
+      if (status === 'error') {
+        const code = (data.error && data.error.code) ? data.error.code : JSON.stringify(data.error);
+        showStatus('error', '❌ ' + (ERRORS[code] || code));
+        return;
+      }
+
+      if (status === 'stream' || status === 'redirect' || status === 'tunnel') {
+        showStatus('success', '✅ تم! اضغط الزر أدناه لتنزيل الفيديو');
+        dlSection.innerHTML = `<a class="download-btn" href="${data.url}" download="${data.filename || 'video.mp4'}" target="_blank" rel="noopener">💾 تنزيل الفيديو</a>`;
+        dlSection.style.display = 'block';
+        return;
+      }
+
+      if (status === 'picker') {
+        const items = data.picker || [];
+        if (!items.length) { showStatus('error', '❌ لم يتم العثور على روابط'); return; }
+        showStatus('success', `✅ تم العثور على ${items.length} نسخة – اختر:`);
+        const list = items.map((item, i) =>
+          `<a class="picker-item" href="${item.url}" download="${item.filename || 'video.mp4'}" target="_blank" rel="noopener">💾 نسخة ${i + 1}${item.type ? ' · ' + item.type : ''}</a>`
+        ).join('');
+        dlSection.innerHTML = `<div class="picker-list">${list}</div>`;
+        dlSection.style.display = 'block';
+        return;
+      }
+
+      showStatus('error', '❌ استجابة غير متوقعة: ' + status);
     }
 
     function showStatus(type, msg) {
