@@ -1,26 +1,46 @@
 import json
 import urllib.request
 import urllib.error
-from flask import Flask, request, jsonify
-
-app = Flask(__name__)
 
 COBALT_API = "https://api.cobalt.tools/"
 
-@app.route("/api/download", methods=["POST", "OPTIONS"])
-def download():
+def handler(request):
+    # CORS preflight
     if request.method == "OPTIONS":
-        resp = app.make_default_options_response()
-        resp.headers["Access-Control-Allow-Origin"] = "*"
-        resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
-        return resp
+        return Response(
+            "",
+            status=204,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type",
+            },
+        )
 
-    data = request.get_json(silent=True) or {}
+    if request.method != "POST":
+        return Response(
+            json.dumps({"error": "Method not allowed"}),
+            status=405,
+            headers={"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        )
+
+    try:
+        body = request.body
+        if isinstance(body, (bytes, bytearray)):
+            data = json.loads(body.decode("utf-8"))
+        else:
+            data = json.loads(body)
+    except Exception:
+        data = {}
+
     video_url = data.get("url", "").strip()
 
     if not video_url or not video_url.startswith("http"):
-        return jsonify({"error": "من فضلك أدخل رابطاً صالحاً"}), 400
+        return Response(
+            json.dumps({"error": "من فضلك أدخل رابطاً صالحاً"}),
+            status=400,
+            headers={"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        )
 
     try:
         payload = json.dumps({
@@ -37,7 +57,7 @@ def download():
             headers={
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "User-Agent": "Mozilla/5.0 (compatible; VideoDownloader/2.0)"
+                "User-Agent": "Mozilla/5.0",
             },
             method="POST"
         )
@@ -45,41 +65,45 @@ def download():
         with urllib.request.urlopen(req, timeout=20) as resp:
             result = json.loads(resp.read().decode("utf-8"))
 
-        status = result.get("status", "")
-
-        if status in ("stream", "redirect", "tunnel"):
-            response = jsonify({
-                "download_url": result.get("url"),
-                "filename": result.get("filename", "video.mp4")
-            })
-        elif status == "picker":
-            picker = result.get("picker", [])
-            if picker:
-                response = jsonify({
-                    "download_url": picker[0].get("url"),
-                    "filename": picker[0].get("filename", "video.mp4")
-                })
-            else:
-                response = jsonify({"error": "لم يتم العثور على رابط للتحميل"}), 500
-        elif status == "error":
-            err = result.get("error", {})
-            err_text = err.get("code", "خطأ من الخادم") if isinstance(err, dict) else str(err)
-            response = jsonify({"error": f"فشل التحميل: {err_text}"}), 500
-        else:
-            response = jsonify({"error": f"استجابة غير متوقعة: {status}"}), 500
-
     except urllib.error.HTTPError as e:
         body_err = e.read().decode("utf-8", errors="ignore")[:400]
-        response = jsonify({"error": f"خطأ من خادم التحميل ({e.code}): {body_err}"}), 502
+        return Response(
+            json.dumps({"error": f"خطأ من خادم التحميل ({e.code}): {body_err}"}),
+            status=502,
+            headers={"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        )
     except urllib.error.URLError as e:
-        response = jsonify({"error": f"تعذّر الوصول إلى خادم التحميل: {str(e.reason)}"}), 503
+        return Response(
+            json.dumps({"error": f"تعذّر الوصول إلى خادم التحميل: {str(e.reason)}"}),
+            status=503,
+            headers={"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        )
     except Exception as e:
-        response = jsonify({"error": f"خطأ داخلي: {str(e)[:200]}"}), 500
+        return Response(
+            json.dumps({"error": f"خطأ داخلي: {str(e)[:200]}"}),
+            status=500,
+            headers={"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        )
 
-    if isinstance(response, tuple):
-        r, code = response
+    status = result.get("status", "")
+
+    if status in ("stream", "redirect", "tunnel"):
+        out = {"download_url": result.get("url"), "filename": result.get("filename", "video.mp4")}
+    elif status == "picker":
+        picker = result.get("picker", [])
+        if picker:
+            out = {"download_url": picker[0].get("url"), "filename": picker[0].get("filename", "video.mp4")}
+        else:
+            out = {"error": "لم يتم العثور على رابط للتحميل"}
+    elif status == "error":
+        err = result.get("error", {})
+        err_text = err.get("code", "خطأ من الخادم") if isinstance(err, dict) else str(err)
+        out = {"error": f"فشل التحميل: {err_text}"}
     else:
-        r, code = response, 200
+        out = {"error": f"استجابة غير متوقعة: {status}"}
 
-    r.headers["Access-Control-Allow-Origin"] = "*"
-    return r, code
+    return Response(
+        json.dumps(out),
+        status=200,
+        headers={"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+    )
