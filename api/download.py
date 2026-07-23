@@ -1,9 +1,9 @@
 import json
-import tempfile
-import os
-import base64
 from http.server import BaseHTTPRequestHandler
-import yt_dlp
+import urllib.request
+import urllib.error
+
+COBALT_API = "https://cobalt.tools/api/json"
 
 class handler(BaseHTTPRequestHandler):
 
@@ -18,52 +18,60 @@ class handler(BaseHTTPRequestHandler):
             self._respond(400, {"error": "طلب غير صالح"})
             return
 
-        if not video_url:
-            self._respond(400, {"error": "الرابط مطلوب"})
-            return
-
-        if not video_url.startswith('http'):
-            self._respond(400, {"error": "رابط غير صالح"})
+        if not video_url or not video_url.startswith('http'):
+            self._respond(400, {"error": "من فضلك أدخل رابطاً صالحاً"})
             return
 
         try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                output_template = os.path.join(tmpdir, 'video.%(ext)s')
+            payload = json.dumps({
+                "url": video_url,
+                "vQuality": "max",
+                "filenamePattern": "classic",
+                "isAudioOnly": False,
+                "disableMetadata": True
+            }).encode('utf-8')
 
-                ydl_opts = {
-                    'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-                    'outtmpl': output_template,
-                    'merge_output_format': 'mp4',
-                    'noplaylist': True,
-                    'quiet': True,
-                    'no_warnings': True,
-                }
+            req = urllib.request.Request(
+                COBALT_API,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "Mozilla/5.0"
+                },
+                method="POST"
+            )
 
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(video_url, download=True)
-                    ext = info.get('ext', 'mp4')
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                result = json.loads(resp.read().decode('utf-8'))
 
-                # Find the downloaded file
-                downloaded = None
-                for fname in os.listdir(tmpdir):
-                    if fname.startswith('video'):
-                        downloaded = os.path.join(tmpdir, fname)
-                        break
+            status = result.get("status", "")
 
-                if not downloaded or not os.path.exists(downloaded):
-                    self._respond(500, {"error": "لم يتم إنشاء ملف الفيديو"})
-                    return
+            if status in ("stream", "redirect", "tunnel"):
+                self._respond(200, {
+                    "download_url": result.get("url"),
+                    "filename": result.get("filename", "video.mp4")
+                })
+            elif status == "picker":
+                picker = result.get("picker", [])
+                if picker:
+                    self._respond(200, {
+                        "download_url": picker[0].get("url"),
+                        "filename": "video.mp4"
+                    })
+                else:
+                    self._respond(500, {"error": "لم يتم العثور على رابط للتحميل"})
+            elif status == "error":
+                err_text = result.get("text", "خطأ من الخادم")
+                self._respond(500, {"error": f"فشل: {err_text}"})
+            else:
+                self._respond(500, {"error": f"استجابة غير متوقعة: {status}"})
 
-                with open(downloaded, 'rb') as f:
-                    video_bytes = f.read()
-
-                b64 = base64.b64encode(video_bytes).decode('utf-8')
-                download_url = f"data:video/mp4;base64,{b64}"
-
-                self._respond(200, {"download_url": download_url, "message": "تم التحميل بنجاح"})
-
-        except yt_dlp.utils.DownloadError as e:
-            self._respond(500, {"error": f"فشل تحميل الفيديو: {str(e)[:200]}"})
+        except urllib.error.HTTPError as e:
+            body_err = e.read().decode('utf-8', errors='ignore')[:300]
+            self._respond(502, {"error": f"HTTP {e.code}: {body_err}"})
+        except urllib.error.URLError as e:
+            self._respond(503, {"error": f"تعذّر الوصول إلى خادم التحميل: {str(e.reason)}"})
         except Exception as e:
             self._respond(500, {"error": f"خطأ داخلي: {str(e)[:200]}"})
 
