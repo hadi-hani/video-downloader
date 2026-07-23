@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>محمّل الفيديوهات</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+    }
+    .container {
+      background: rgba(255,255,255,0.07);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 24px;
+      padding: 48px 40px;
+      width: 90%;
+      max-width: 560px;
+      text-align: center;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.4);
+    }
+    .logo { font-size: 52px; margin-bottom: 12px; }
+    h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+    p.subtitle { color: rgba(255,255,255,0.6); font-size: 14px; margin-bottom: 36px; }
+    .platforms { display: flex; gap: 10px; justify-content: center; margin-bottom: 32px; flex-wrap: wrap; }
+    .badge {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 20px;
+      padding: 6px 16px;
+      font-size: 13px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .input-group { display: flex; gap: 10px; flex-direction: column; }
+    input {
+      width: 100%;
+      padding: 16px 20px;
+      border-radius: 14px;
+      border: 2px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.3s;
+      text-align: right;
+    }
+    input::placeholder { color: rgba(255,255,255,0.4); }
+    input:focus { border-color: #7c6fcd; }
+    button {
+      width: 100%;
+      padding: 16px;
+      background: linear-gradient(135deg, #7c6fcd, #5a4fcf);
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    button:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(124,111,205,0.5); }
+    button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .status {
+      margin-top: 24px;
+      padding: 16px 20px;
+      border-radius: 14px;
+      font-size: 14px;
+      display: none;
+    }
+    .status.loading { background: rgba(255,200,0,0.1); border: 1px solid rgba(255,200,0,0.3); color: #ffd700; }
+    .status.success { background: rgba(0,255,130,0.1); border: 1px solid rgba(0,255,130,0.3); color: #00ff82; }
+    .status.error   { background: rgba(255,80,80,0.1);  border: 1px solid rgba(255,80,80,0.3);  color: #ff6b6b; }
+    .download-btn {
+      display: none;
+      margin-top: 16px;
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #00c853, #00796b);
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.3s;
+    }
+    .download-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,200,83,0.4); }
+    .spinner { display: inline-block; width: 18px; height: 18px; border: 3px solid rgba(255,215,0,0.3); border-top-color: #ffd700; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .footer { margin-top: 32px; color: rgba(255,255,255,0.3); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">🎬</div>
+    <h1>محمّل الفيديوهات</h1>
+    <p class="subtitle">حمّل أي فيديو قصير بضغطة واحدة</p>
+
+    <div class="platforms">
+      <span class="badge">▶ YouTube Shorts</span>
+      <span class="badge">📸 Instagram Reels</span>
+      <span class="badge">🎵 TikTok</span>
+    </div>
+
+    <div class="input-group">
+      <input type="url" id="videoUrl" placeholder="الصق رابط الفيديو هنا..." />
+      <button id="downloadBtn" onclick="startDownload()">
+        <span>⬇</span> تحميل الفيديو
+      </button>
+    </div>
+
+    <div class="status" id="status"></div>
+    <a class="download-btn" id="dlLink" target="_blank">💾 اضغط هنا لتنزيل الفيديو</a>
+
+    <div class="footer">يدعم روابط YouTube · Instagram · TikTok · Twitter/X</div>
+  </div>
+
+  <script>
+    async function startDownload() {
+      const url = document.getElementById('videoUrl').value.trim();
+      const btn = document.getElementById('downloadBtn');
+      const status = document.getElementById('status');
+      const dlLink = document.getElementById('dlLink');
+
+      if (!url) {
+        showStatus('error', '⚠️ من فضلك أدخل رابط الفيديو أولاً');
+        return;
+      }
+
+      btn.disabled = true;
+      dlLink.style.display = 'none';
+      showStatus('loading', '<span class="spinner"></span>  جارٍ معالجة الفيديو...');
+
+      try {
+        const res = await fetch('/api/download', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+
+        const data = await res.json();
+
+        if (data.download_url) {
+          showStatus('success', '✅ تم! الفيديو جاهز للتنزيل');
+          dlLink.href = data.download_url;
+          dlLink.style.display = 'block';
+        } else {
+          showStatus('error', '❌ ' + (data.error || 'حدث خطأ غير متوقع'));
+        }
+      } catch (e) {
+        showStatus('error', '❌ فشل الاتصال بالخادم');
+      }
+
+      btn.disabled = false;
+    }
+
+    function showStatus(type, msg) {
+      const el = document.getElementById('status');
+      el.className = 'status ' + type;
+      el.innerHTML = msg;
+      el.style.display = 'block';
+    }
+
+    document.getElementById('videoUrl').addEventListener('keydown', e => {
+      if (e.key === 'Enter') startDownload();
+    });
+  </script>
+</body>
+</html>
