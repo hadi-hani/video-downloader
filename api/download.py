@@ -1,9 +1,9 @@
 import json
-import subprocess
 import tempfile
 import os
 import base64
 from http.server import BaseHTTPRequestHandler
+import yt_dlp
 
 class handler(BaseHTTPRequestHandler):
 
@@ -22,39 +22,39 @@ class handler(BaseHTTPRequestHandler):
             self._respond(400, {"error": "الرابط مطلوب"})
             return
 
-        # Validate URL roughly
         if not video_url.startswith('http'):
             self._respond(400, {"error": "رابط غير صالح"})
             return
 
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
-                output_path = os.path.join(tmpdir, 'video.mp4')
+                output_template = os.path.join(tmpdir, 'video.%(ext)s')
 
-                result = subprocess.run(
-                    [
-                        'yt-dlp',
-                        '--no-playlist',
-                        '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-                        '--merge-output-format', 'mp4',
-                        '-o', output_path,
-                        video_url
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
+                ydl_opts = {
+                    'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                    'outtmpl': output_template,
+                    'merge_output_format': 'mp4',
+                    'noplaylist': True,
+                    'quiet': True,
+                    'no_warnings': True,
+                }
 
-                if result.returncode != 0:
-                    error_msg = result.stderr[-300:] if result.stderr else 'فشل التحميل'
-                    self._respond(500, {"error": f"فشل تحميل الفيديو: {error_msg}"})
-                    return
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=True)
+                    ext = info.get('ext', 'mp4')
 
-                if not os.path.exists(output_path):
+                # Find the downloaded file
+                downloaded = None
+                for fname in os.listdir(tmpdir):
+                    if fname.startswith('video'):
+                        downloaded = os.path.join(tmpdir, fname)
+                        break
+
+                if not downloaded or not os.path.exists(downloaded):
                     self._respond(500, {"error": "لم يتم إنشاء ملف الفيديو"})
                     return
 
-                with open(output_path, 'rb') as f:
+                with open(downloaded, 'rb') as f:
                     video_bytes = f.read()
 
                 b64 = base64.b64encode(video_bytes).decode('utf-8')
@@ -62,10 +62,10 @@ class handler(BaseHTTPRequestHandler):
 
                 self._respond(200, {"download_url": download_url, "message": "تم التحميل بنجاح"})
 
-        except subprocess.TimeoutExpired:
-            self._respond(504, {"error": "انتهت مهلة التحميل، جرب رابطاً آخر"})
+        except yt_dlp.utils.DownloadError as e:
+            self._respond(500, {"error": f"فشل تحميل الفيديو: {str(e)[:200]}"})
         except Exception as e:
-            self._respond(500, {"error": f"خطأ داخلي: {str(e)}"})
+            self._respond(500, {"error": f"خطأ داخلي: {str(e)[:200]}"})
 
     def do_OPTIONS(self):
         self.send_response(200)
