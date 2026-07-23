@@ -1,1 +1,1 @@
-# No external dependencies needed - using stdlib urllib only
+flask==3.1.0

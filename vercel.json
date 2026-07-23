@@ -8,8 +8,7 @@
   "routes": [
     {
       "src": "/api/download",
-      "dest": "/api/download.py",
-      "methods": ["POST", "OPTIONS"]
+      "dest": "/api/download.py"
     },
     {
       "src": "/(.*)",
